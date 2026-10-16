@@ -84,7 +84,7 @@ textarea {
   </header>
 
   <div class="stage">
-    <video id="vid" playsinline muted autoplay></video>
+    <video id="vid" playsinline muted autoplay autopictureinpicture></video>
     <span class="badge" id="badge">Preview</span>
   </div>
   <p class="status" id="status">Tap Float it, then swipe to TikTok or your camera.</p>
@@ -253,31 +253,39 @@ Try it tomorrow. Leave the phone across the room, ask the question, and see how 
   vid.addEventListener('pause', () => { if (mode === 'live' && document.pictureInPictureElement === vid) setPaused(true); });
   vid.addEventListener('play', () => { if (mode === 'live' && pausedAt !== null) setPaused(false); });
 
-  async function enterPip() {
+  const inPip = () => document.pictureInPictureElement === vid || vid.webkitPresentationMode === 'picture-in-picture';
+  function pipFailed(e) {
+    const why = e ? `${e.name || 'Error'}: ${e.message || 'no details'}` : 'iPhone did not open the window';
+    setStatus(mode === 'live'
+      ? `iPhone would not float the live text (${why}). Tap Make it a video, wait for it to finish, then tap Float it again.`
+      : `iPhone would not float the video either (${why}). Send Claude a screenshot of this message.`, true);
+  }
+  // Runs synchronously inside the tap. iPhone only allows a pop-out during the tap itself,
+  // so nothing may be awaited before this call.
+  function enterPip() {
     try {
-      if (document.pictureInPictureEnabled && vid.requestPictureInPicture) {
-        await vid.requestPictureInPicture(); return true;
-      }
       if (vid.webkitSupportsPresentationMode && vid.webkitSupportsPresentationMode('picture-in-picture')) {
-        vid.webkitSetPresentationMode('picture-in-picture'); return true;
+        vid.webkitSetPresentationMode('picture-in-picture');
+        setTimeout(() => { if (!inPip()) pipFailed(null); }, 1200);
+        return;
       }
-    } catch (e) {
-      setStatus('The floating window was blocked here. Open this page in Safari and try again.', true);
-      return false;
-    }
+      if (document.pictureInPictureEnabled && vid.requestPictureInPicture) {
+        vid.requestPictureInPicture().catch(pipFailed);
+        return;
+      }
+    } catch (e) { pipFailed(e); return; }
     setStatus('Floating windows are not available in this browser. Open this page in Safari on your iPhone.', true);
-    return false;
   }
 
   vid.addEventListener('enterpictureinpicture', () => { ui.tally.classList.add('on'); setStatus('Floating. Swipe home and open your recording app.'); });
   vid.addEventListener('leavepictureinpicture', () => { ui.tally.classList.remove('on'); setStatus('Back in the page. Tap Float it to pop out again.'); });
   vid.addEventListener('webkitpresentationmodechanged', () => ui.tally.classList.toggle('on', vid.webkitPresentationMode === 'picture-in-picture'));
 
-  $('floatBtn').addEventListener('click', async () => {
+  $('floatBtn').addEventListener('click', () => {
     if (mode === 'live') { restart(); setPaused(false); }
     else { vid.currentTime = 0; }
-    try { await vid.play(); } catch (e) {}
-    await enterPip();
+    enterPip();
+    vid.play().catch(() => {});
   });
   $('restartBtn').addEventListener('click', () => { restart(); setPaused(false); });
   $('pauseBtn').addEventListener('click', () => setPaused(pausedAt === null));
